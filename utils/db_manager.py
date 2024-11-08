@@ -3,6 +3,7 @@ import logging
 from typing import Optional, Dict, List, Any
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 
 logger = logging.getLogger('discord')
 
@@ -220,3 +221,29 @@ class DatabaseManager:
                 AND timestamp > NOW() - $3::interval
                 ORDER BY timestamp DESC
             """, guild_id, data_type, timeframe)
+
+    async def add_announcement_template(self, guild_id: int, name: str, title: str, content: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO announcement_templates (guild_id, name, title, content)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (guild_id, name) 
+                DO UPDATE SET title = $3, content = $4
+            """, guild_id, name, title, content)
+
+    async def get_announcement_template(self, guild_id: int, name: str):
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("""
+                SELECT * FROM announcement_templates 
+                WHERE guild_id = $1 AND name = $2
+            """, guild_id, name)
+
+    async def schedule_announcement(self, guild_id: int, channel_id: int, 
+                                 title: str, content: str, schedule_time: datetime, 
+                                 repeat: Optional[str] = None):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO scheduled_announcements 
+                (guild_id, channel_id, title, content, schedule_time, repeat_type)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """, guild_id, channel_id, title, content, schedule_time, repeat)

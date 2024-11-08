@@ -1,27 +1,16 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import json
 import logging
+from typing import Optional
 
 logger = logging.getLogger('discord')
 
 class Welcome(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.welcome_settings = {}
-        self.load_settings()
-
-    def load_settings(self):
-        try:
-            with open('data/welcome_settings.json', 'r') as f:
-                self.welcome_settings = json.load(f)
-        except FileNotFoundError:
-            self.welcome_settings = {}
-
-    def save_settings(self):
-        with open('data/welcome_settings.json', 'w') as f:
-            json.dump(self.welcome_settings, f, indent=4)
+        self.db = bot.db
+        logger.info("Welcome cog initialized")
 
     @app_commands.command(name="setwelcome", description="Set welcome message settings")
     @app_commands.default_permissions(manage_guild=True)
@@ -30,23 +19,27 @@ class Welcome(commands.Cog):
         interaction: discord.Interaction,
         channel: discord.TextChannel,
         message: str,
-        dm_message: str = None,
+        dm_message: Optional[str] = None,
         embed: bool = True
     ):
-        guild_id = str(interaction.guild_id)
-        self.welcome_settings[guild_id] = {
-            'channel_id': channel.id,
-            'message': message,
-            'dm_message': dm_message,
-            'use_embed': embed
-        }
-        
-        self.save_settings()
-        
-        await interaction.response.send_message(
-            "Welcome message settings updated!",
-            ephemeral=True
-        )
+        try:
+            await self.db.set_welcome(
+                interaction.guild_id,
+                channel.id,
+                message,
+                dm_message,
+                embed
+            )
+            await interaction.response.send_message(
+                "Welcome message settings updated!",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error setting welcome message: {e}")
+            await interaction.response.send_message(
+                "Failed to update welcome settings.",
+                ephemeral=True
+            )
 
     @app_commands.command(name="testwelcome", description="Test welcome message")
     @app_commands.default_permissions(manage_guild=True)
@@ -58,30 +51,42 @@ class Welcome(commands.Cog):
         )
 
     async def send_welcome_message(self, member):
-        guild_id = str(member.guild.id)
-        if guild_id not in self.welcome_settings:
-            return
+        try:
+            settings = await self.db.get_welcome_settings(member.guild.id)
+            if not settings:
+                return
 
-        settings = self.welcome_settings[guild_id]
-        channel = member.guild.get_channel(settings['channel_id'])
-        
-        if not channel:
-            return
+            channel = member.guild.get_channel(settings['channel_id'])
+            if not channel:
+                return
 
-        # Replace placeholders in message
-        message = settings['message'].replace('{user}', member.mention)
-        message = message.replace('{server}', member.guild.name)
-        message = message.replace('{count}', str(member.guild.member_count))
+            message = settings['welcome_message']
+            message = message.replace('{user}', member.mention)
+            message = message.replace('{server}', member.guild.name)
+            message = message.replace('{count}', str(member.guild.member_count))
 
-        if settings.get('use_embed', True):
-            embed = discord.Embed(
-                title=f"Welcome to {member.guild.name}!",
-                description=message,
-                color=discord.Color.blue()
-            )
-            await channel.send(embed=embed)
-        else:
-            await channel.send(message)
+            if settings['use_embed']:
+                embed = discord.Embed(
+                    title=f"Welcome to {member.guild.name}!",
+                    description=message,
+                    color=discord.Color.blue()
+                )
+                await channel.send(embed=embed)
+            else:
+                await channel.send(message)
+
+            if settings['dm_message']:
+                try:
+                    dm_msg = settings['dm_message'].replace('{server}', member.guild.name)
+                    await member.send(dm_msg)
+                except discord.Forbidden:
+                    logger.warning(f"Could not send DM to {member}")
+        except Exception as e:
+            logger.error(f"Error sending welcome message: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member):
+        await self.send_welcome_message(member)
 
 async def setup(bot):
     await bot.add_cog(Welcome(bot)) 
