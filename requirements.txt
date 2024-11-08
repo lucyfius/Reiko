@@ -1,0 +1,7 @@
+discord.py>=2.0.0
+python-dotenv
+asyncpg
+matplotlib
+pandas
+seaborn
+textblob 

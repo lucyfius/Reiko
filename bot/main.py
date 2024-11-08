@@ -1,75 +1,68 @@
 import discord
 from discord.ext import commands
-import json
-import logging
-from pathlib import Path
 import os
 from dotenv import load_dotenv
+import asyncpg
+import ssl
+import logging
 
-# Load environment variables
-load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('discord')
 
-# Bot configuration
-class LumiBot(commands.Bot):
+class Bot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
-        intents.members = True
         intents.message_content = True
-        intents.presences = True
+        intents.members = True
         
         super().__init__(
-            command_prefix="!",  # Fallback prefix
+            command_prefix="!",
             intents=intents,
-            help_command=None  # We'll implement our own help command
+            help_command=None
+        )
+        self.db = None  # Will store our database pool
+
+    async def setup_hook(self):
+        # Load environment variables
+        load_dotenv()
+        
+        # Create SSL context
+        ssl_context = ssl.create_default_context(
+            cafile="certs/root.crt"
         )
         
-        # Store bot configuration
-        self.config = {}
-        self.load_config()
-        
-    async def setup_hook(self):
-        # Load all cogs
-        await self.load_extensions()
-        
-    def load_config(self):
+        # Create database pool
         try:
-            with open('config/config.json', 'r') as f:
-                self.config = json.load(f)
-        except FileNotFoundError:
-            self.config = {}
-            self.save_config()
-            
-    def save_config(self):
-        with open('config/config.json', 'w') as f:
-            json.dump(self.config, f, indent=4)
-            
-    async def load_extensions(self):
-        """Load all extensions (cogs) from the cogs directory"""
-        for file in Path('cogs').glob('*.py'):
-            if file.name != '__init__.py':
-                extension = f"cogs.{file.stem}"
+            self.db = await asyncpg.create_pool(
+                os.getenv('DATABASE_URL'),
+                ssl=ssl_context,
+                min_size=5,
+                max_size=20
+            )
+            logger.info("Successfully connected to database!")
+        except Exception as e:
+            logger.error(f"Failed to connect to database: {e}")
+            raise
+
+        # Load all cogs
+        for filename in os.listdir('./cogs'):
+            if filename.endswith('.py'):
                 try:
-                    await self.load_extension(extension)
-                    logger.info(f"Loaded extension {extension}")
+                    await self.load_extension(f'cogs.{filename[:-3]}')
+                    logger.info(f"Loaded extension: {filename}")
                 except Exception as e:
-                    logger.error(f"Failed to load extension {extension}: {e}")
+                    logger.error(f"Failed to load extension {filename}: {e}")
 
-bot = LumiBot()
+    async def close(self):
+        # Cleanup
+        if self.db:
+            await self.db.close()
+        await super().close()
 
-@bot.event
-async def on_ready():
-    logger.info(f'Logged in as {bot.user.name} ({bot.user.id})')
-    await bot.tree.sync()  # Sync slash commands
-
-def main():
-    token = os.getenv('DISCORD_TOKEN')
-    if not token:
-        raise ValueError("No Discord token found in environment variables")
-    bot.run(token)
+async def main():
+    bot = Bot()
+    async with bot:
+        await bot.start(os.getenv('DISCORD_TOKEN'))
 
 if __name__ == "__main__":
-    main() 
+    import asyncio
+    asyncio.run(main()) 
