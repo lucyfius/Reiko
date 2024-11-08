@@ -76,6 +76,34 @@ class DatabaseManager:
                 )
             """)
 
+            # Reaction Roles table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS reaction_roles (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    guild_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    channel_id BIGINT NOT NULL,
+                    role_id BIGINT NOT NULL,
+                    emoji TEXT NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (message_id, emoji)
+                )
+            """)
+
+            # Analytics Data table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS analytics_data (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    guild_id BIGINT NOT NULL,
+                    data_type TEXT NOT NULL,
+                    target_id BIGINT NOT NULL,
+                    count INTEGER DEFAULT 0,
+                    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    additional_data JSONB,
+                    INDEX (guild_id, data_type, target_id)
+                )
+            """)
+
     # Warning Methods
     async def add_warning(self, guild_id: int, user_id: int, moderator_id: int, reason: str) -> int:
         async with self.pool.acquire() as conn:
@@ -154,3 +182,41 @@ class DatabaseManager:
             return await conn.fetch("""
                 SELECT * FROM custom_commands WHERE guild_id = $1
             """, guild_id)
+
+    # Add methods for reaction roles
+    async def add_reaction_role(self, guild_id: int, message_id: int, 
+                              channel_id: int, role_id: int, emoji: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO reaction_roles 
+                (guild_id, message_id, channel_id, role_id, emoji)
+                VALUES ($1, $2, $3, $4, $5)
+            """, guild_id, message_id, channel_id, role_id, emoji)
+
+    async def get_reaction_roles(self, guild_id: int) -> List[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT * FROM reaction_roles WHERE guild_id = $1
+            """, guild_id)
+
+    # Add methods for analytics
+    async def log_analytics(self, guild_id: int, data_type: str, 
+                          target_id: int, count: int = 1, 
+                          additional_data: dict = None):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO analytics_data 
+                (guild_id, data_type, target_id, count, additional_data)
+                VALUES ($1, $2, $3, $4, $5)
+            """, guild_id, data_type, target_id, count, additional_data)
+
+    async def get_analytics_data(self, guild_id: int, data_type: str, 
+                               timeframe: str) -> List[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("""
+                SELECT * FROM analytics_data 
+                WHERE guild_id = $1 
+                AND data_type = $2
+                AND timestamp > NOW() - $3::interval
+                ORDER BY timestamp DESC
+            """, guild_id, data_type, timeframe)
