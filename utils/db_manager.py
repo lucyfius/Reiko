@@ -247,3 +247,67 @@ class DatabaseManager:
                 (guild_id, channel_id, title, content, schedule_time, repeat_type)
                 VALUES ($1, $2, $3, $4, $5, $6)
             """, guild_id, channel_id, title, content, schedule_time, repeat)
+
+    async def get_automod_settings(self, guild_id: int):
+        async with self.pool.acquire() as conn:
+            settings = await conn.fetchrow("""
+                INSERT INTO automod_settings (guild_id)
+                VALUES ($1)
+                ON CONFLICT (guild_id) DO UPDATE SET guild_id = EXCLUDED.guild_id
+                RETURNING *;
+            """, guild_id)
+            return dict(settings)
+
+    async def update_automod_settings(self, guild_id: int, settings: dict):
+        async with self.pool.acquire() as conn:
+            query = """
+                UPDATE automod_settings
+                SET {} 
+                WHERE guild_id = $1
+            """.format(
+                ', '.join(f"{k} = ${i+2}" for i, k in enumerate(settings.keys()))
+            )
+            await conn.execute(query, guild_id, *settings.values())
+
+    async def log_violation(self, guild_id: int, user_id: int, 
+                          action_type: str, reason: str):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO automod_logs 
+                (guild_id, user_id, action_type, reason)
+                VALUES ($1, $2, $3, $4)
+            """, guild_id, user_id, action_type, reason)
+
+    async def get_whitelist(self, guild_id: int, type: str):
+        async with self.pool.acquire() as conn:
+            items = await conn.fetch("""
+                SELECT item FROM automod_whitelist
+                WHERE guild_id = $1 AND type = $2
+            """, guild_id, type)
+            return [item['item'] for item in items]
+
+    async def update_filter_settings(self, guild_id: int, settings: dict):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO filter_settings (guild_id, filter_action, notify_channel)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (guild_id) 
+                DO UPDATE SET 
+                    filter_action = $2,
+                    notify_channel = $3
+            """, guild_id, settings['filter_action'], settings['notify_channel'])
+
+    async def get_filter_settings(self, guild_id: int):
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("""
+                SELECT * FROM filter_settings WHERE guild_id = $1
+            """, guild_id)
+
+    async def log_filter_violation(self, guild_id: int, user_id: int, 
+                                 channel_id: int, severity: int):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO filter_violations 
+                (guild_id, user_id, channel_id, severity)
+                VALUES ($1, $2, $3, $4)
+            """, guild_id, user_id, channel_id, severity)

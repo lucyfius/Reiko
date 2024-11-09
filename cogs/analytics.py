@@ -52,5 +52,15 @@ class Analytics(commands.Cog):
         # Create visualizations...
         # (rest of your visualization code)
 
+    @app_commands.command(name="activity")
+    async def activity_heatmap(self, interaction: discord.Interaction):
+        """Generate server activity heatmap"""
+        # Implementation here
+
+    @app_commands.command(name="growth")
+    async def server_growth(self, interaction: discord.Interaction):
+        """Show server growth statistics"""
+        # Implementation here
+
 async def setup(bot):
     await bot.add_cog(Analytics(bot)) 
