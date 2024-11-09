@@ -178,6 +178,13 @@ class AutoMod(commands.Cog):
                     inline=False
                 )
 
-            await interaction.response.send_message(embe
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Error viewing violations: {e}")
+            await interaction.response.send_message(
+                "Failed to retrieve violations.",
+                ephemeral=True
+            )
+
 async def setup(bot):
     await bot.add_cog(AutoMod(bot))
